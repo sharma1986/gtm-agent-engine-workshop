@@ -67,14 +67,25 @@ def build_prospect_profile(prospect_id: str) -> dict:
     return {"prospect_profile": built, "found": True}
 
 
+# Revenue and technology fit each carry twice the weight of segment fit.
+RUBRIC_WEIGHTS = {
+    "revenue_fit": 0.4,
+    "tech_stack_match": 0.4,
+    "segment_fit": 0.2,
+}
+
 SCORING_PROMPT = (
-    "You are a GTM assistant. Score the prospect's potential for the offering from "
-    "1 to 100 based on how good a fit they are, weighing their annual revenue and "
-    "tech stack. In your justification, explicitly list which of the offering's required "
-    "technologies the prospect has and which required technologies they are missing, naming "
-    "each one. Any missing required technology must lower the tech_stack_match component and "
-    "the overall score. Return a score and a justification that reflects your "
-    "overall assessment of this prospect's potential."
+    "You are a GTM assistant. Provide rubric component scores from 1 to 100 and a "
+    "justification for the prospect's fit for the offering. revenue_fit measures annual "
+    "revenue against the offering's min_annual_revenue; tech_stack_match measures "
+    "coverage of the offering's required_tech_stack; segment_fit compares the prospect's "
+    "account segment with the offering's target_segment. In your justification, list "
+    "each required technology the prospect has or is missing. Missing required "
+    "technologies must lower tech_stack_match. "
+    "The overall score is computed deterministically in code as a weighted sum, "
+    + ", ".join(f"{name} {weight:.0%}" for name, weight in RUBRIC_WEIGHTS.items())
+    + ", rounded to one decimal. Do not calculate the overall score; provide only "
+    "component scores and their justification."
 )
 
 from typing import Literal
@@ -87,7 +98,7 @@ class RubricBreakdown(BaseModel):
 
 
 class ProspectScore(BaseModel):
-    score: float
+    score: float = 0
     max_score: int = 100
     justification: str
     rubric_breakdown: RubricBreakdown
@@ -119,6 +130,10 @@ def score_prospect(prospect_profile: dict, offering: dict | None = None) -> dict
         {"role": "system", "content": SCORING_PROMPT},
         {"role": "user", "content": user},
     ])
+    result.score = round(sum(
+        getattr(result.rubric_breakdown, component) * weight
+        for component, weight in RUBRIC_WEIGHTS.items()
+    ), 1)
     return result.model_dump()
 
 
